@@ -1,0 +1,54 @@
+# ComplyTrack — root build context ignore file.
+#
+# Used when an image is built from the repository root (context `.`). The
+# per-service contexts in docker-compose.yml (./backend, ./frontend) use
+# backend/.dockerignore and frontend/.dockerignore instead.
+
+# --- VCS / CI ---------------------------------------------------------
+.git
+.gitignore
+.github
+
+# --- secrets ----------------------------------------------------------
+.env
+.env.*
+!.env.example
+deploy/certs/
+
+# --- Python -----------------------------------------------------------
+**/__pycache__/
+**/*.py[cod]
+backend/.venv/
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/.coverage
+**/htmlcov/
+
+# --- application data -------------------------------------------------
+*.db
+*.sqlite*
+backend/storage/
+backend/outbox/
+backend/backups/
+backups/
+
+# --- Node / build output ----------------------------------------------
+**/node_modules/
+**/dist/
+**/.vite/
+**/playwright-report/
+**/test-results/
+
+# --- docs / misc ------------------------------------------------------
+docs/
+scripts/
+Makefile
+*.md
+
+# --- editors / OS -----------------------------------------------------
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.log

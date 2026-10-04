@@ -1,0 +1,138 @@
+# ComplyTrack — Docker Compose stack.
+#
+#   cp .env.example .env      # then edit the secrets
+#   docker compose up -d --build
+#   open http://localhost:8080
+#
+# Services:
+#   db        PostgreSQL 16 with a named volume and a pg_isready healthcheck
+#   backend   FastAPI (uvicorn, 4 workers) — API + reminder scheduler
+#   frontend  nginx serving the built SPA and proxying /api/ to backend
+#
+# TLS is terminated by a reverse proxy in front of this stack — see the
+# commented `nginx` service at the bottom, as required by PRD §13.
+
+name: complytrack
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-complytrack}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-in-production}
+      POSTGRES_DB: ${POSTGRES_DB:-complytrack}
+      # India data residency: keep the cluster in IST for readable logs.
+      TZ: Asia/Kolkata
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-complytrack} -d ${POSTGRES_DB:-complytrack}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    # Not published to the host by default — only the backend needs it.
+    # Uncomment to inspect with psql from the host:
+    # ports:
+    #   - "127.0.0.1:5432:5432"
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: complytrack-backend:latest
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      # Compose overrides the local SQLite default with the in-cluster database.
+      # psycopg (v3) is installed in the image's builder stage.
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://complytrack:change-me-in-production@db:5432/complytrack}
+      STORAGE_DIR: /app/storage
+      MAIL_OUTBOX_DIR: /app/outbox
+      # Serving the SPA is nginx's job in this stack, so the API mounts nothing.
+      FRONTEND_DIST_DIR: /app/nonexistent
+      # Set to "false" here and run the scheduler on exactly one replica if you
+      # scale the backend horizontally. Single container: leave as-is.
+      SCHEDULER_ENABLED: ${SCHEDULER_ENABLED:-true}
+    volumes:
+      - storage:/app/storage
+      - outbox:/app/outbox
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4).status == 200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: complytrack-frontend:latest
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "${FRONTEND_PORT:-8080}:80"
+
+volumes:
+  pgdata:
+  storage:
+  outbox:
+
+# --------------------------------------------------------------------------- #
+# TLS termination (PRD §13 — TLS 1.2+ in production).
+#
+# The stack above speaks plain HTTP on an internal Docker network. To expose it
+# over HTTPS, put a TLS-terminating reverse proxy in front and point your
+# certificate at it. Uncomment, create ./deploy/certs (server.crt/server.key or
+# a fullchain PEM/key pair), and change the frontend/backend ports so they are
+# reachable only from the proxy network.
+#
+#   nginx:
+#     image: nginx:alpine
+#     restart: unless-stopped
+#     depends_on:
+#       - frontend
+#       - backend
+#     ports:
+#       - "80:80"
+#       - "443:443"
+#     volumes:
+#       - ./deploy/nginx-tls.conf:/etc/nginx/conf.d/default.conf:ro
+#       - ./deploy/certs:/etc/nginx/certs:ro
+#
+# deploy/nginx-tls.conf (sketch):
+#
+#   server {
+#     listen 80;
+#     server_name complytrack.example.in;
+#     return 301 https://$host$request_uri;
+#   }
+#   server {
+#     listen 443 ssl;
+#     http2 on;
+#     server_name complytrack.example.in;
+#     ssl_certificate     /etc/nginx/certs/fullchain.pem;
+#     ssl_certificate_key /etc/nginx/certs/privkey.pem;
+#     ssl_protocols       TLSv1.2 TLSv1.3;
+#     ssl_ciphers         HIGH:!aNULL:!MD5;
+#     ssl_prefer_server_ciphers on;
+#     add_header Strict-Transport-Security "max-age=31536000" always;
+#     client_max_body_size 32m;
+#     location / { proxy_pass http://frontend:80; proxy_set_header Host $host; }
+#     location /api/ { proxy_pass http://backend:8000; proxy_set_header Host $host;
+#                      proxy_set_header X-Forwarded-Proto $scheme; }
+#   }
+#
+# For an on-premise CA or an Indian certificate authority, install the issued
+# fullchain/key at ./deploy/certs. Never commit certificates to the repository
+# (see .gitignore). Run `docker compose config` after uncommenting to validate.
+# --------------------------------------------------------------------------- #

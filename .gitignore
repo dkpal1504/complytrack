@@ -1,0 +1,105 @@
+# =========================================================================== #
+#  ComplyTrack — repository .gitignore
+# =========================================================================== #
+
+# --- secrets / local configuration ----------------------------------------- #
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+deploy/certs/
+
+# --- Python ---------------------------------------------------------------- #
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib64/
+parts/
+sdist/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.venv/
+venv/
+env/
+ENV/
+.python-version
+
+# --- test / coverage ------------------------------------------------------- #
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.tox/
+.nox/
+.mypy_cache/
+.ruff_cache/
+
+# --- application data (never commit runtime data) -------------------------- #
+*.db
+*.db.*
+*.db-*
+*.sqlite
+*.sqlite3
+backend/complytrack.db
+backend/storage/
+backend/outbox/
+backend/backups/
+data/
+uploads/
+
+# --- Node / frontend ------------------------------------------------------- #
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+.vite/
+*.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.eslintcache
+# TypeScript's incremental build cache, written by `npm run typecheck`.
+*.tsbuildinfo
+
+# --- Playwright / e2e ------------------------------------------------------ #
+playwright-report/
+test-results/
+blob-report/
+frontend/playwright-report/
+frontend/test-results/
+# The suite is configured to write here rather than to Playwright's defaults.
+frontend/e2e/.artifacts/
+frontend/e2e/.report/
+
+# --- editors / OS ---------------------------------------------------------- #
+.vscode/
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- logs / backups / temp ------------------------------------------------- #
+*.log
+logs/
+backups/
+*.tar.gz
+*.zip
+tmp/
+temp/

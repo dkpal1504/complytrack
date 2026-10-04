@@ -1,0 +1,37 @@
+# Build context is ./backend — keep the image lean and free of runtime data.
+
+# --- VCS / secrets ----------------------------------------------------
+.git
+.gitignore
+.env
+.env.*
+
+# --- Python -----------------------------------------------------------
+.venv/
+venv/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# --- application data (mounted as volumes instead) --------------------
+*.db
+*.sqlite*
+complytrack.db
+storage/
+outbox/
+backups/
+
+# --- tests / tooling --------------------------------------------------
+tests/
+
+# --- editors / OS -----------------------------------------------------
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.log

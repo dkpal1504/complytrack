@@ -1,0 +1,28 @@
+# =========================================================================== #
+#  ComplyTrack — line-ending policy
+#
+#  The index stores LF; the working copy on Windows keeps whatever the developer
+#  has configured. What must not drift is the handful of files a POSIX shell has
+#  to execute or parse: a CRLF `#!/usr/bin/env bash` fails with "bad interpreter:
+#  /bin/bash^M" under Git Bash and WSL, and `make` reads a CRLF Makefile as a
+#  recipe full of stray carriage returns.
+# =========================================================================== #
+
+* text=auto
+
+# Executed or parsed by POSIX tools — LF, always.
+*.sh text eol=lf
+Makefile text eol=lf
+
+# Windows-only tooling.
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary — never touched.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.woff2 binary
+*.pdf binary

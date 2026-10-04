@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="ComplyTrack">
+  <title>ComplyTrack</title>
+  <rect width="64" height="64" rx="14" fill="#0f4c81"/>
+  <path d="M32 8.5 55 17.6v14.9c0 8.6-4.4 15.9-11.4 20.4L32 58.5l-11.6-5.6C13.4 48.4 9 41.1 9 32.5V17.6z" fill="#ffffff"/>
+  <path d="M20.5 32.4 27.4 39.3 43.5 22.6" fill="none" stroke="#0f4c81" stroke-width="6.4" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

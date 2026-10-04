@@ -1,0 +1,4 @@
+# ComplyTrack holds statutory compliance records for a private organisation.
+# Nothing here should be crawled or indexed by any search engine.
+User-agent: *
+Disallow: /
