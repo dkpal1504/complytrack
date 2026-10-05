@@ -103,3 +103,9 @@ backups/
 *.zip
 tmp/
 temp/
+
+# --- video production (rollout film) --------------------------------------- #
+# The HyperFrames project for the ComplyTrack rollout film: source captures,
+# snapshots and the rendered MP4 are large binaries that are not part of the
+# application. Ignored so a stray `git add .` cannot pull ~90 MB into history.
+videos/
