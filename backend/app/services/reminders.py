@@ -350,7 +350,9 @@ def send_reminder(
         log.error = "Deferred - quiet hours."
 
     elif channel == ReminderChannel.EMAIL:
-        result = notifications.deliver_email(to=recipient.email, subject=subject, html=html)
+        result = notifications.deliver_email(
+            to=recipient.email, subject=subject, html=html, db=db,
+        )
         log.status = ReminderStatus.SENT if result.ok else ReminderStatus.FAILED
         log.sent_at = utcnow() if result.ok else None
         log.error = None if result.ok else result.detail
@@ -486,6 +488,7 @@ def escalate(db: Session, ctx: ReminderContext, *, commit: bool = True) -> list[
                     to=user.email,
                     subject=f"[ESCALATION L{level}] {ctx.item.name} — {ctx.item.criticality}",
                     html=_escalation_html(ctx, level, user),
+                    db=db,
                 )
             created.append(log)
 
@@ -710,6 +713,7 @@ def retry_failed(db: Session, *, limit: int = 100) -> int:
             to=log.recipient_address,
             subject=log.subject or "Compliance reminder",
             html=log.body or "",
+            db=db,
         )
         log.retry_count += 1
         if result.ok:

@@ -3,33 +3,58 @@
  *
  * When SMTP is configured, nothing lands here — reminders go straight out. When
  * it is not, the engine spools each message to disk as a `.eml` file so a
- * tester can open it in a mail client. This screen exists to make that
- * difference obvious rather than leaving "we never got the reminder" a mystery.
+ * tester can read exactly what a recipient would have received. This screen
+ * exists to make that difference obvious rather than leaving "we never got the
+ * reminder" a mystery.
  *
- * The API returns file metadata only; it never streams the message contents.
+ * Opening a file shows the message the way the recipient would read it, fetched
+ * from the API. The HTML part is shown as source rather than rendered: a real
+ * e-mail carries its own styles, which would leak into the app around it.
  */
 
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
+import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Chip } from "@/components/ui/Chip";
-import { EmptyState, ErrorState } from "@/components/ui/Feedback";
+import { EmptyState, ErrorState, SkeletonRows } from "@/components/ui/Feedback";
 import { Icon } from "@/components/ui/Icon";
+import { SegmentedControl } from "@/components/ui/Nav";
+import { Modal } from "@/components/ui/Overlay";
 import { Panel, ResultCount, Toolbar } from "@/components/ui/Page";
 import { DataTable, type Column } from "@/components/ui/Table";
 import { api } from "@/lib/api";
 import { formatBytes, formatDateTime } from "@/lib/format";
 import { qk } from "@/lib/query";
-import type { OutboxResponse } from "@/features/admin/admin-types";
+import type { OutboxMessage, OutboxResponse } from "@/features/admin/admin-types";
+
+type BodyView = "message" | "source";
 
 export function OutboxTab() {
+  const [openName, setOpenName] = useState<string | null>(null);
+  const [bodyView, setBodyView] = useState<BodyView>("message");
+
   const query = useQuery({
     queryKey: qk.reminders.outbox,
     queryFn: () => api<OutboxResponse>("/reminders/outbox"),
   });
 
+  const message = useQuery({
+    queryKey: qk.reminders.outboxMessage(openName ?? ""),
+    queryFn: () => api<OutboxMessage>(`/reminders/outbox/${encodeURIComponent(openName ?? "")}`),
+    enabled: openName !== null,
+  });
+
   const data = query.data;
   const files = data?.files ?? [];
+
+  const open = (name: string) => {
+    // The message and its source are two views of one file, so reopening a
+    // different message starts on the readable one again.
+    setBodyView("message");
+    setOpenName(name);
+  };
 
   const columns: Column<OutboxResponse["files"][number]>[] = [
     {
@@ -43,14 +68,35 @@ export function OutboxTab() {
       key: "size",
       header: "Size",
       align: "right",
+      hideBelow: "sm",
       sortValue: (row) => row.size_bytes,
       cell: (row) => <span className="tabular">{formatBytes(row.size_bytes)}</span>,
     },
     {
       key: "modified",
       header: "Written",
+      hideBelow: "md",
       sortValue: (row) => row.modified_at,
       cell: (row) => <span className="tabular">{formatDateTime(row.modified_at)}</span>,
+    },
+    {
+      key: "open",
+      header: <span className="sr-only">Read</span>,
+      align: "right",
+      cell: (row) => (
+        // The row itself is clickable too; this is the visible, focusable way in.
+        <Button
+          size="sm"
+          variant="ghost"
+          icon="document"
+          onClick={(event) => {
+            event.stopPropagation();
+            open(row.name);
+          }}
+        >
+          Open
+        </Button>
+      ),
     },
   ];
 
@@ -85,8 +131,8 @@ export function OutboxTab() {
             <Icon name="alert" size={15} className="mt-0.5 shrink-0 text-rag-amber" />
             <p>
               Nobody is receiving reminder e-mails in this environment. The messages below are the
-              ones the engine intended to send. Configure SMTP under Settings in Master data to
-              deliver them for real.
+              ones the engine intended to send — open one to read it, or set up a mail server on the{" "}
+              <span className="font-medium">E-mail (SMTP)</span> tab to deliver them for real.
             </p>
           </div>
         )}
@@ -117,6 +163,7 @@ export function OutboxTab() {
             rows={files}
             getRowId={(row) => row.name}
             loading={query.isPending}
+            onRowClick={(row) => open(row.name)}
             empty={
               <EmptyState
                 icon="mail"
@@ -140,16 +187,75 @@ export function OutboxTab() {
             the delivery log.
           </li>
           <li className="flex gap-2">
-            <Icon name="document" size={14} className="mt-0.5 shrink-0 text-ink-subtle" />
-            Each file is a complete message — open it in a mail client to see exactly what the
-            recipient would have received.
+            <Icon name="mail-check" size={14} className="mt-0.5 shrink-0 text-ink-subtle" />
+            Each file is a complete message. Open one to read the recipient, the subject and the
+            body exactly as the engine wrote it.
           </li>
           <li className="flex gap-2">
-            <Icon name="shield" size={14} className="mt-0.5 shrink-0 text-ink-subtle" />
-            Message contents are not exposed through the API; this screen shows only file metadata.
+            <Icon name="info" size={14} className="mt-0.5 shrink-0 text-ink-subtle" />
+            The formatted body is offered as source rather than a live preview, because an e-mail
+            brings its own styling and would not render as the recipient sees it.
           </li>
         </ul>
       </Panel>
+
+      <Modal
+        open={openName !== null}
+        onClose={() => setOpenName(null)}
+        title={message.data?.subject ?? "Spooled message"}
+        description={openName ?? undefined}
+        size="lg"
+        footer={<Button onClick={() => setOpenName(null)}>Close</Button>}
+      >
+        {message.isPending && openName !== null ? (
+          <SkeletonRows rows={5} />
+        ) : message.error ? (
+          <ErrorState error={message.error} onRetry={() => void message.refetch()} />
+        ) : message.data ? (
+          <div className="space-y-3">
+            <dl className="grid gap-x-4 gap-y-1.5 text-xs sm:grid-cols-[6rem_1fr]">
+              {(
+                [
+                  ["To", message.data.to],
+                  ["From", message.data.from],
+                  ["Sent", message.data.date],
+                ] as const
+              ).map(([label, value]) => (
+                <div key={label} className="contents">
+                  <dt className="font-semibold text-ink-subtle">{label}</dt>
+                  <dd className="min-w-0 break-all text-ink">{value ?? "—"}</dd>
+                </div>
+              ))}
+              <div className="contents">
+                <dt className="font-semibold text-ink-subtle">Size</dt>
+                <dd className="text-ink">{formatBytes(message.data.size_bytes)}</dd>
+              </div>
+            </dl>
+
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <SegmentedControl
+                options={[
+                  { value: "message", label: "Message" },
+                  { value: "source", label: "HTML source" },
+                ]}
+                value={bodyView}
+                onChange={setBodyView}
+                label="Message body view"
+              />
+              <p className="text-2xs text-ink-subtle">
+                {bodyView === "message"
+                  ? "The plain-text part — what a text-only client shows"
+                  : "The raw formatted body, shown as source"}
+              </p>
+            </div>
+
+            <pre className="scroll-thin max-h-[50vh] overflow-auto rounded-[var(--radius-control)] border border-line bg-surface-muted p-3 text-xs whitespace-pre-wrap text-ink">
+              {(bodyView === "message" ? message.data.text : message.data.html) ||
+                (bodyView === "message" ? "(no plain-text body)" : "(no formatted body)")}
+            </pre>
+          </div>
+        ) : null}
+      </Modal>
     </div>
   );
 }

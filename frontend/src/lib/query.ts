@@ -83,6 +83,10 @@ export const qk = {
     jobs: ["reminders", "jobs"] as const,
     templates: ["reminders", "templates"] as const,
     outbox: ["reminders", "outbox"] as const,
+    // Nested under ``outbox`` so refreshing the listing also refreshes any
+    // message currently open in the preview.
+    outboxMessage: (name: string) => ["reminders", "outbox", name] as const,
+    mail: ["reminders", "mail"] as const,
   },
 
   org: {

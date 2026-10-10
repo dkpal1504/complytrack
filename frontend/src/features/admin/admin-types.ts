@@ -334,10 +334,52 @@ export interface EmailTemplateRow {
   placeholders: string[];
 }
 
-/** `GET /reminders/outbox` — spooled `.eml` metadata, never the content. */
+/** `GET /reminders/outbox` — spooled `.eml` metadata. */
 export interface OutboxResponse {
   smtp_configured: boolean;
   directory: string;
   count: number;
   files: { name: string; size_bytes: number; modified_at: string }[];
+}
+
+/** `GET /reminders/outbox/{name}` — one spooled message, decoded for reading. */
+export interface OutboxMessage {
+  name: string;
+  size_bytes: number;
+  modified_at: string;
+  to: string | null;
+  from: string | null;
+  subject: string | null;
+  date: string | null;
+  text: string | null;
+  html: string | null;
+}
+
+/**
+ * `GET /reminders/mail` — the effective SMTP configuration.
+ *
+ * The password is never sent; `password_set` is all the screen gets. `source`
+ * says where the values came from, and `read_only` is true when the environment
+ * is in charge and editing would be misleading.
+ */
+export interface MailConfigResponse {
+  host: string;
+  port: number;
+  user: string;
+  sender: string;
+  use_tls: boolean;
+  use_ssl: boolean;
+  password_set: boolean;
+  source: "environment" | "settings" | "unconfigured";
+  read_only: boolean;
+  smtp_configured: boolean;
+  outbox_dir: string;
+}
+
+/** `POST /reminders/test-email` — the outcome of one test send. */
+export interface TestEmailResult {
+  ok: boolean;
+  detail: string;
+  mode: "smtp" | "spool";
+  to: string;
 }

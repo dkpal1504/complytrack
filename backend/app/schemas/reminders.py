@@ -6,7 +6,7 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, Field
 
-from app.schemas.common import ORMModel
+from app.schemas.common import EmailAddress, ORMModel
 
 
 class DocumentOut(ORMModel):
@@ -194,3 +194,26 @@ class RunRemindersResult(BaseModel):
     skipped_duplicates: int
     failures: int
     details: list[dict] = Field(default_factory=list)
+
+
+class MailConfigUpdate(BaseModel):
+    """A partial update of the stored SMTP settings.
+
+    Every field is optional and ``exclude_unset`` decides what is written, so a
+    screen that shows a masked password can leave ``password`` out entirely and
+    the stored one survives. Send an empty string to clear it.
+    """
+
+    host: str | None = Field(None, max_length=255)
+    port: int | None = Field(None, ge=1, le=65535)
+    user: str | None = Field(None, max_length=255)
+    password: str | None = Field(None, max_length=255)
+    sender: EmailAddress | None = None
+    use_tls: bool | None = None
+    use_ssl: bool | None = None
+
+
+class TestEmailRequest(BaseModel):
+    """Where to send a test message. Defaults to the caller's own address."""
+
+    to: EmailAddress | None = None

@@ -89,6 +89,7 @@ def run_scheduled_reports_job() -> dict:
                         text=f"{report['name']}: {len(report['rows'])} rows.",
                         attachments=[(f"{report['code']}.{schedule.format}", payload,
                                       "application/octet-stream")],
+                        db=db,
                     )
                     schedule.last_run_at = now
                     sent += 1

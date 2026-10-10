@@ -3,15 +3,27 @@
 from __future__ import annotations
 
 from datetime import datetime
+from email import policy
+from email.parser import BytesParser
+from pathlib import Path
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import func, select
 
-from app.api.common import CurrentUser, DbSession, context_from, not_found
+from app.api.common import (
+    CurrentUser,
+    DbSession,
+    bad_request,
+    conflict,
+    context_from,
+    not_found,
+)
+from app.core.config import settings
 from app.core.deps import Context, require
 from app.core.rbac import Permission
 from app.db.types import utcnow
 from app.domain import escalation as escalation_rules
+from app.models.org import Setting
 from app.models.reminders import (
     EmailTemplate,
     EscalationLog,
@@ -23,10 +35,12 @@ from app.models.reminders import (
 )
 from app.schemas.reminders import (
     EmailTemplateUpdate,
+    MailConfigUpdate,
     ReminderProfileCreate,
     ReminderProfileUpdate,
+    TestEmailRequest,
 )
-from app.services import audit, notifications, reminders
+from app.services import audit, mail_config, notifications, reminders
 
 router = APIRouter(prefix="/reminders", tags=["Reminder engine"])
 
@@ -287,8 +301,6 @@ def job_history(
 def outbox(
     db: DbSession, user: User = Depends(require(Permission.MANAGE_SETTINGS))
 ) -> dict:
-    from app.core.config import settings
-
     path = settings.mail_outbox_dir
     files = []
     if path.exists():
@@ -300,10 +312,245 @@ def outbox(
                 "modified_at": datetime.fromtimestamp(stat.st_mtime),
             })
     return {
-        "smtp_configured": bool(settings.smtp_host),
+        "smtp_configured": mail_config.resolve(db).configured,
         "directory": str(path),
         "count": len(files),
         "files": files,
+    }
+
+
+# --------------------------------------------------------------------------- #
+# Mail configuration (SMTP)
+# --------------------------------------------------------------------------- #
+#: A spooled message is a small text file. Anything larger is not one of ours.
+MAX_OUTBOX_BYTES = 5 * 1024 * 1024
+
+#: Request field name to settings-table key. They differ for the from-address,
+#: which the mailer has always called ``smtp_from`` while the screen calls it a
+#: sender — the stored key has to stay the one the mailer reads.
+MAIL_FIELD_KEYS = {
+    "host": "smtp_host",
+    "port": "smtp_port",
+    "user": "smtp_user",
+    "password": "smtp_password",
+    "sender": "smtp_from",
+    "use_tls": "smtp_use_tls",
+    "use_ssl": "smtp_use_ssl",
+}
+
+
+def _mail_dict(cfg: mail_config.MailConfig) -> dict:
+    """The mail configuration as the settings screen needs it.
+
+    The password is reported only as a boolean. It is the one value this API
+    must never hand back, so there is no code path here that could.
+    """
+    return {
+        "host": cfg.host,
+        "port": cfg.port,
+        "user": cfg.user,
+        "sender": cfg.sender,
+        "use_tls": cfg.use_tls,
+        "use_ssl": cfg.use_ssl,
+        "password_set": cfg.password_set,
+        "source": cfg.source,
+        "read_only": cfg.read_only,
+        "smtp_configured": cfg.configured,
+        "outbox_dir": str(settings.mail_outbox_dir),
+    }
+
+
+def _write_setting(db: DbSession, key: str, value: object, user: User) -> bool:
+    """Store one settings key. Returns True when the row was newly created."""
+    setting = db.execute(select(Setting).where(Setting.key == key)).scalar_one_or_none()
+    created = setting is None
+    if setting is None:
+        setting = Setting(key=key, created_by=user.id)
+    else:
+        # A key that was soft-deleted comes back rather than colliding with the
+        # unique index.
+        setting.is_deleted = False
+        setting.deleted_at = None
+    setting.value = value
+    setting.updated_by = user.id
+    db.add(setting)
+    db.flush()
+    return created
+
+
+@router.get("/mail", summary="Effective SMTP configuration and where it came from")
+def read_mail_config(
+    db: DbSession, user: User = Depends(require(Permission.MANAGE_SETTINGS))
+) -> dict:
+    return _mail_dict(mail_config.resolve(db))
+
+
+@router.put("/mail", summary="Store SMTP settings used when the environment is silent")
+def update_mail_config(
+    payload: MailConfigUpdate,
+    request: Request,
+    db: DbSession,
+    user: User = Depends(require(Permission.MANAGE_SETTINGS)),
+) -> dict:
+    """Save the mail settings the app should use.
+
+    Refused outright when the environment already sets SMTP_HOST: that is a
+    deployment decision, and silently shadowing it from a web form is how a
+    working relay gets broken without anyone noticing.
+    """
+    if mail_config.resolve(db).read_only:
+        raise conflict(
+            "SMTP is configured from the environment (SMTP_HOST), so the stored "
+            "settings are ignored. Change it in the deployment configuration."
+        )
+
+    fields = payload.model_dump(exclude_unset=True)
+    if fields.get("use_ssl") and fields.get("use_tls"):
+        raise bad_request(
+            "STARTTLS and implicit SSL cannot both be used. Choose one."
+        )
+
+    # The password is deliberately kept out of the audit payload. ``changes`` is
+    # serialised verbatim — REDACTED_FIELDS only guards field/old_value/new_value
+    # — so it must never be given the value in the first place.
+    changed: dict[str, object] = {}
+    password_changed = False
+    for name, value in fields.items():
+        if name == "password":
+            password_changed = value is not None
+            if not password_changed:
+                continue
+        _write_setting(db, MAIL_FIELD_KEYS[name], value, user)
+        changed[name] = "***redacted***" if name == "password" else value
+
+    audit.write_audit(
+        db,
+        entity_type="setting",
+        entity_id="smtp",
+        action="update",
+        new_value=None,
+        changes={**changed, **({"password": "***redacted***"} if password_changed else {})},
+        reason="Updated SMTP mail settings.",
+        **context_from(request, user),
+    )
+    db.commit()
+    return _mail_dict(mail_config.resolve(db))
+
+
+def _test_email_html(cfg: mail_config.MailConfig) -> str:
+    if cfg.configured:
+        detail = (
+            f"Delivered through <strong>{cfg.host}:{cfg.port}</strong> using "
+            f"{'implicit TLS' if cfg.use_ssl else ('STARTTLS' if cfg.use_tls else 'no encryption')}."
+        )
+    else:
+        detail = (
+            "No mail server is configured, so this message was written to the "
+            "outbox on the server instead of being sent."
+        )
+    return (
+        "<p>This is a test message from ComplyTrack.</p>"
+        f"<p>{detail}</p>"
+        "<p>If you are reading it, reminder e-mails will reach their recipients "
+        "the same way.</p>"
+    )
+
+
+@router.post("/test-email", summary="Send one test message and report what happened")
+def send_test_email(
+    db: DbSession,
+    user: User = Depends(require(Permission.MANAGE_SETTINGS)),
+    payload: TestEmailRequest | None = None,
+) -> dict:
+    """Prove the mail settings, rather than waiting for a reminder to fail.
+
+    Answers 200 either way and carries the outcome, because a refused password
+    is an ordinary result to show the operator, not a server fault.
+    """
+    cfg = mail_config.resolve(db)
+    recipient = (payload.to if payload and payload.to else None) or user.email
+    if not recipient:
+        raise bad_request("Your account has no e-mail address to send the test to.")
+
+    result = notifications.deliver_email(
+        to=recipient,
+        subject="[ComplyTrack] Test e-mail",
+        html=_test_email_html(cfg),
+        db=db,
+    )
+    return {
+        "ok": result.ok,
+        "detail": result.detail,
+        "mode": cfg.mode,
+        "to": recipient,
+    }
+
+
+def _safe_outbox_file(name: str) -> Path:
+    """Resolve one spooled message, refusing anything outside the outbox.
+
+    ``name`` arrives from the URL, so it is untrusted. Rejecting any name that is
+    not already a bare filename disposes of ``..``, sub-paths, drive letters and
+    UNC paths in one test; resolving both sides then also defeats a symlink
+    planted inside the outbox.
+    """
+    if (
+        not name
+        or name != Path(name).name
+        or Path(name).is_absolute()
+        or name.startswith(".")
+        or not name.lower().endswith(".eml")
+    ):
+        raise not_found("Outbox message")
+
+    root = settings.mail_outbox_dir.resolve()
+    candidate = (root / name).resolve()
+    if candidate.parent != root or not candidate.is_file():
+        raise not_found("Outbox message")
+    if candidate.stat().st_size > MAX_OUTBOX_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="That outbox message is too large to display.",
+        )
+    return candidate
+
+
+@router.get("/outbox/{name}", summary="Read one spooled e-mail")
+def read_outbox_message(
+    name: str, db: DbSession, user: User = Depends(require(Permission.MANAGE_SETTINGS))
+) -> dict:
+    """The message the engine would have sent, so a tester can read it.
+
+    Declared after ``/outbox`` on purpose: FastAPI matches routes in order, and
+    this path segment would otherwise swallow the listing.
+    """
+    path = _safe_outbox_file(name)
+    try:
+        # policy.default decodes the headers and splits the MIME parts for us.
+        message = BytesParser(policy=policy.default).parsebytes(path.read_bytes())
+    except Exception as exc:  # noqa: BLE001 — a corrupt spool file is not a crash
+        raise bad_request(f"That outbox message could not be read: {exc}") from exc
+
+    def body(subtype: str) -> str | None:
+        part = message.get_body(preferencelist=(subtype,))
+        if part is None:
+            return None
+        try:
+            return part.get_content()
+        except Exception:  # noqa: BLE001 — fall back to the raw payload
+            return part.get_payload(decode=True).decode("utf-8", "replace")
+
+    stat = path.stat()
+    return {
+        "name": path.name,
+        "size_bytes": stat.st_size,
+        "modified_at": datetime.fromtimestamp(stat.st_mtime),
+        "to": message.get("To"),
+        "from": message.get("From"),
+        "subject": message.get("Subject"),
+        "date": message.get("Date"),
+        "text": body("plain"),
+        "html": body("html"),
     }
 
 

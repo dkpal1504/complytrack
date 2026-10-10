@@ -18,6 +18,7 @@ from app.core.config import settings
 from app.db.types import utcnow
 from app.models.auth import User
 from app.models.reminders import EmailTemplate, Notification, ReminderLog
+from app.services import mail_config
 
 
 # --------------------------------------------------------------------------- #
@@ -173,12 +174,22 @@ class DeliveryResult:
 
 
 def deliver_email(
-    *, to: str, subject: str, html: str, text: str | None = None, attachments: list[tuple[str, bytes, str]] | None = None
+    *, to: str, subject: str, html: str, text: str | None = None,
+    attachments: list[tuple[str, bytes, str]] | None = None,
+    db: Session | None = None,
 ) -> DeliveryResult:
-    """Send via SMTP, or spool to the outbox when SMTP is unconfigured."""
+    """Send via SMTP, or spool to the outbox when SMTP is unconfigured.
+
+    The configuration is resolved here rather than passed in, so a caller that
+    has a session need only remember the one word ``db=db`` — and a caller that
+    forgets it still behaves exactly as it did before the settings screen
+    existed, reading the environment alone.
+    """
+    cfg = mail_config.resolve(db)
+
     message = EmailMessage()
     message["Subject"] = subject
-    message["From"] = settings.smtp_from
+    message["From"] = cfg.sender
     message["To"] = to
     message.set_content(text or _html_to_text(html))
     message.add_alternative(html, subtype="html")
@@ -190,20 +201,37 @@ def deliver_email(
             filename=filename,
         )
 
-    if not settings.smtp_host:
+    if not cfg.configured:
         outbox: Path = settings.mail_outbox_dir
         outbox.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
         safe = "".join(c for c in to if c.isalnum() or c in "._@-") or "recipient"
-        (outbox / f"{stamp}_{safe}.eml").write_bytes(message.as_bytes())
+        # The clock only advances so fast — about a millisecond on Windows — so
+        # two messages to the same recipient inside one tick would otherwise be
+        # given the same name, and the second would quietly erase the first. The
+        # outbox would then show fewer messages than the run actually produced,
+        # which is precisely the question it exists to answer. Disambiguate on
+        # the way in rather than overwriting.
+        target = outbox / f"{stamp}_{safe}.eml"
+        suffix = 1
+        while target.exists():
+            suffix += 1
+            target = outbox / f"{stamp}-{suffix}_{safe}.eml"
+        target.write_bytes(message.as_bytes())
         return DeliveryResult(True, "spooled to outbox (SMTP not configured)")
 
     try:
-        with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=20) as server:
-            if settings.smtp_use_tls:
+        # Port 465 speaks TLS from the first byte; 587 starts plain and upgrades.
+        server = (
+            smtplib.SMTP_SSL(cfg.host, cfg.port, timeout=20)
+            if cfg.use_ssl
+            else smtplib.SMTP(cfg.host, cfg.port, timeout=20)
+        )
+        with server:
+            if cfg.use_tls and not cfg.use_ssl:
                 server.starttls()
-            if settings.smtp_user:
-                server.login(settings.smtp_user, settings.smtp_password)
+            if cfg.user:
+                server.login(cfg.user, cfg.password)
             server.send_message(message)
         return DeliveryResult(True, "sent")
     except Exception as exc:  # noqa: BLE001 — delivery failure must not break the run

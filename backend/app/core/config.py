@@ -46,14 +46,22 @@ class Settings(BaseSettings):
     entra_redirect_uri: str = "http://localhost:8000/api/auth/sso/callback"
 
     # --- mail ---------------------------------------------------------------
+    # These may also be set from the app's settings screen, which stores them in
+    # the ``settings`` table. Anything set here wins outright and makes the
+    # stored values read-only — see ``services/mail_config.py``.
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_user: str = ""
     smtp_password: str = ""
     smtp_from: str = "complytrack@example.com"
     smtp_use_tls: bool = True
+    # Implicit TLS (SMTPS, usually port 465) as opposed to STARTTLS on 587. The
+    # two are mutually exclusive; SSL wins if both are set.
+    smtp_use_ssl: bool = False
     # When no SMTP host is configured the mailer writes .eml files here instead
-    # of sending, so reminders are fully testable offline.
+    # of sending, so reminders are fully testable offline. Deliberately not
+    # settable from the settings screen: it is a server filesystem path, not a
+    # delivery parameter.
     mail_outbox_dir: Path = BACKEND_DIR / "outbox"
 
     # --- engine behaviour ---------------------------------------------------

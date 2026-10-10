@@ -47,7 +47,7 @@ from app.schemas.org import (
     UnitOut,
     UnitUpdate,
 )
-from app.services import audit
+from app.services import audit, mail_config
 
 router = APIRouter(prefix="/org", tags=["Master data"])
 
@@ -583,7 +583,11 @@ def delete_holiday(
 # --------------------------------------------------------------------------- #
 def _setting_dict(setting: Setting) -> dict:
     return {
-        "id": setting.id, "key": setting.key, "value": setting.value,
+        "id": setting.id, "key": setting.key,
+        # This route echoes values verbatim, so anything secret is masked here as
+        # a backstop. Such keys are also filtered out of the listing below, which
+        # is what the settings screen actually sees.
+        "value": "***redacted***" if setting.key in mail_config.SECRET_KEYS else setting.value,
         "description": setting.description,
     }
 
@@ -593,7 +597,15 @@ def list_settings(
     db: DbSession, user: User = Depends(require(Permission.MANAGE_SETTINGS))
 ) -> list[dict]:
     rows = db.execute(
-        select(Setting).where(Setting.is_deleted.is_(False)).order_by(Setting.key)
+        select(Setting)
+        .where(
+            Setting.is_deleted.is_(False),
+            # Secrets are omitted rather than masked: this generic editor would
+            # otherwise offer the value for editing and write the mask back over
+            # the real one. They are set on the mail settings screen instead.
+            Setting.key.not_in(mail_config.SECRET_KEYS),
+        )
+        .order_by(Setting.key)
     ).scalars().all()
     return [_setting_dict(row) for row in rows]
 

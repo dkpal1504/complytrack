@@ -1,15 +1,15 @@
 /**
  * The reminder engine (RM-01…RM-11, EX-01…EX-08, OW-04).
  *
- * Seven views of one engine: the schedules it follows, the ladder it escalates
- * by, what it sent, what it escalated, when it last ran, the words it uses, and
- * what it could not deliver.
+ * Eight views of one engine: the schedules it follows, the ladder it escalates
+ * by, what it sent, what it escalated, when it last ran, the words it uses, what
+ * it could not deliver, and the mail server that would deliver it.
  *
- * The screen itself requires CONFIGURE_ENGINE. Three of its tabs read data that
+ * The screen itself requires CONFIGURE_ENGINE. Four of its tabs read data that
  * needs a different permission on the server — job history needs the audit
  * permission, message templates need the template permission, and the outbox
- * needs the settings permission — so those tabs are only offered when the
- * signed-in user can actually open them.
+ * and the mail server settings both need the settings permission — so those
+ * tabs are only offered when the signed-in user can actually open them.
  */
 
 import { Tabs } from "@/components/ui/Nav";
@@ -23,6 +23,7 @@ import { DeliveryLogTab } from "@/features/admin/DeliveryLogTab";
 import { EscalationsTab } from "@/features/admin/EscalationsTab";
 import { JobsTab } from "@/features/admin/JobsTab";
 import { EmailTemplatesTab } from "@/features/admin/EmailTemplatesTab";
+import { MailSettingsTab } from "@/features/admin/MailSettingsTab";
 import { OutboxTab } from "@/features/admin/OutboxTab";
 
 export default function RemindersPage() {
@@ -42,6 +43,11 @@ export default function RemindersPage() {
     { id: "escalations", label: "Escalations", icon: "alert" as const },
     ...(canViewAudit ? [{ id: "jobs", label: "Jobs", icon: "history" as const }] : []),
     ...(canManageTemplates ? [{ id: "templates", label: "Templates", icon: "mail" as const }] : []),
+    // The settings come before the outbox: configuring a relay is what stops
+    // messages landing there, so it reads as the fix to the symptom next door.
+    ...(canManageSettings
+      ? [{ id: "mail", label: "E-mail (SMTP)", icon: "settings" as const }]
+      : []),
     ...(canManageSettings ? [{ id: "outbox", label: "Outbox", icon: "archive" as const }] : []),
   ];
 
@@ -72,6 +78,7 @@ export default function RemindersPage() {
     escalations: <EscalationsTab />,
     jobs: canViewAudit ? <JobsTab /> : null,
     templates: canManageTemplates ? <EmailTemplatesTab /> : null,
+    mail: canManageSettings ? <MailSettingsTab /> : null,
     outbox: canManageSettings ? <OutboxTab /> : null,
   };
 

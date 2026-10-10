@@ -166,9 +166,17 @@ app.include_router(api_router)
 @app.get("/health", tags=["Operations"], summary="Liveness and readiness probe")
 def health() -> dict:
     database = "ok"
+    # Mail settings may live in the database, so read them alongside the probe
+    # rather than from the environment alone. A database that will not answer
+    # falls back to the environment, which is also what an operator needs to
+    # know: the probe still reports, and reports honestly.
+    smtp_configured = bool(settings.smtp_host)
     try:
         with SessionLocal() as db:
             db.execute(text("SELECT 1"))
+            from app.services.mail_config import resolve as resolve_mail
+
+            smtp_configured = resolve_mail(db).configured
     except Exception as exc:  # noqa: BLE001
         database = f"error: {exc}"
 
@@ -188,7 +196,7 @@ def health() -> dict:
         "time_utc": utcnow(),
         "database": database,
         "scheduler": "running" if scheduler_running else "stopped",
-        "smtp_configured": bool(settings.smtp_host),
+        "smtp_configured": smtp_configured,
     }
 
 
