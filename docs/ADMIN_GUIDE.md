@@ -72,11 +72,14 @@ date and the working-day target when a due date lands on a holiday or weekend.
 
 ### 1.7 System settings
 
-**Admin → System Settings.** Key/value configuration such as
+**Admin → Master data → Settings.** Key/value configuration such as
 `financial_year_start_month` (default 4 = April), `timezone` (Asia/Kolkata),
 `reminder_schedule_hour_ist` (7), `quiet_hours`, `branding`,
 `default_lead_time_days` (90) and `exposure_display`. Values are stored in the
 database and can be changed without a redeploy.
+
+> The mail relay is **not** here. It has its own screen with its own test button
+> — see [§3.4](#34-e-mail-smtp-settings-and-proving-that-mail-works).
 
 *API:* `GET /api/v1/org/settings`, `PUT /api/v1/org/settings/{key}`.
 
@@ -141,7 +144,7 @@ Compliance Register.
 
 ### 3.1 Reminder profiles
 
-**Admin → Reminder Profiles.** A profile defines:
+**Admin → Reminders & Escalation → Profiles.** A profile defines:
 
 - **Offsets** — days before the anchor date. Defaults:
   `[90, 60, 30, 15, 7, 3, 1, 0]` (the `0` is "on the day").
@@ -163,7 +166,8 @@ individual item.
 
 ### 3.2 Escalation matrix
 
-**Admin → Escalation Matrix.** A ladder of levels; each rule has a trigger
+**Admin → Reminders & Escalation → Escalation ladder.** A ladder of levels; each
+rule has a trigger
 (number of days before/after), a status condition, the roles to notify and the
 channels. The default:
 
@@ -179,19 +183,63 @@ channels. The default:
 
 ### 3.3 Delivery log and failed-delivery retry
 
-- **Admin → Reminders → Log** shows every reminder with channel, recipient,
+- **Admin → Reminders & Escalation → Delivery log** shows every reminder with
+  channel, recipient,
   scheduled/sent time and status (Queued / Sent / Delivered / Failed / Read /
   Skipped).
 - **Retry failed** re-sends anything that failed (`POST /api/v1/reminders/retry-failed`).
   Failed deliveries also raise an alert notification to Administrators.
-- When SMTP is unconfigured, mail is spooled as `.eml` files under
-  `MAIL_OUTBOX_DIR` and can be inspected at `GET /api/v1/reminders/outbox`.
+
+Escalation e-mails are recorded on the escalation log, not in the reminder log,
+so a delivery count taken from one will not match the other. Add the two
+together when reconciling against what the mail server received.
+
+### 3.4 E-mail (SMTP) settings, and proving that mail works
+
+**Admin → Reminders & Escalation → E-mail (SMTP)** (the page is headed *Reminder
+engine*). Sets the relay the engine sends through: host, port, user, password,
+sender address and the transport. This is the screen to reach for when the
+question is *"are the reminder e-mails actually going out?"*
+
+- **Transport.** `STARTTLS` (usually port 587) starts plain and upgrades;
+  **implicit TLS / SMTPS** (usually 465) speaks TLS from the first byte. They are
+  mutually exclusive — asking for both is refused rather than guessed at, since
+  `starttls()` on an already-encrypted socket is an error.
+- **Send test e-mail.** Sends a real message through the settings currently on
+  screen — not the saved ones — and reports what the server answered. A refused
+  password or a blocked port comes back as a readable sentence here, which is
+  the fastest way to tell a wrong password from a wrong port. Leave the recipient
+  blank to send to your own address.
+- **Read the outbox.** With no relay configured, the engine does not discard
+  mail: it writes each message as a `.eml` file under `MAIL_OUTBOX_DIR`
+  (`backend/outbox/` by default). **Admin → Reminders & Escalation → Outbox**
+  lists them and opens any one of them in the browser, showing the message as
+  the recipient would read it, plus the raw HTML source. This is how you verify a
+  reminder without a mail server. (`GET /api/v1/reminders/outbox`,
+  `GET /api/v1/reminders/outbox/{name}`.)
+
+**The environment wins, all or nothing.** If `SMTP_HOST` is set in the
+environment or `backend/.env`, the environment governs *every* mail variable and
+this screen is read-only, refusing writes with `409`. The precedence is
+deliberate: a half-merged state — an environment host with a port or sender left
+over from the saved settings — is exactly how mail quietly goes to the wrong
+relay. For production, set the `SMTP_*` variables in the environment and leave
+the screen alone; for development and UAT, leave them unset and configure here.
+
+> **The password is stored in the database in plain text.** Acceptable while
+> testing, and it is never echoed back by any endpoint or written to the audit
+> trail. It should not be used that way in production — set `SMTP_PASSWORD` in
+> the environment instead, which by design takes over this screen.
+
+*API:* `GET/PUT /api/v1/reminders/mail`, `POST /api/v1/reminders/test-email`.
+All of these require `MANAGE_SETTINGS`; the Compliance Team does not hold it.
 
 ---
 
 ## 4. Email templates
 
-**Admin → Email Templates.** Five templates ship — `reminder_upcoming`,
+**Admin → Reminders & Escalation → Templates.** Five templates ship —
+`reminder_upcoming`,
 `reminder_expired`, `escalation`, `weekly_digest` and `push_short` — covering
 the PRD §11 defaults. Edit subject and HTML body using the placeholders:
 
@@ -257,7 +305,8 @@ any matter under inspection until that matter is closed.
 
 ## 7. The daily job dashboard
 
-**Admin → Jobs** (`GET /api/v1/reminders/jobs`). Shows the heartbeat of the
+**Admin → Reminders & Escalation → Jobs** (`GET /api/v1/reminders/jobs`). Shows
+the heartbeat of the
 scheduler:
 
 - **Daily reminders** job — runs at **07:00 IST**; records reminders sent,
@@ -267,6 +316,8 @@ scheduler:
 - **Scheduled reports** job — runs at **07:15 IST**.
 - **Run now** (`POST /api/v1/reminders/run`) triggers the reminder job manually
   — it is **idempotent**, so a second run on the same day does not double-send.
+  Run it before a UAT session and then read the results on **Reminders &
+  Escalation → Outbox**, which needs no mail server (see §3.4).
 
 If the scheduler shows as `stopped` on `/health`, check `SCHEDULER_ENABLED` and
 the container logs.
@@ -406,6 +457,13 @@ is in [README §6](../README.md#6-environment-variables). The variables an
 Administrator changes most often: `SECRET_KEY`, `DATABASE_URL`, `STORAGE_DIR`,
 `SMTP_*`, `SCHEDULER_ENABLED`, `SCHEDULER_HOUR_IST`, `SEED_DEMO_DATA`,
 `CORS_ORIGINS`, and the Entra ID `ENTRA_*` values.
+
+The `SMTP_*` block is the one exception to "change it in the file": it can also
+be set from **Reminders & Escalation → E-mail (SMTP)** (§3.4). Setting `SMTP_HOST` in
+the environment is what pins the relay for production, and it disables the
+screen. `SMTP_USE_SSL` selects implicit TLS (port 465) as against `SMTP_USE_TLS`
+for STARTTLS (port 587); the two are mutually exclusive, and SSL wins if both
+are set.
 
 Health and metadata for monitoring:
 

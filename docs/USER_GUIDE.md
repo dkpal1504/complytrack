@@ -78,7 +78,8 @@ slipping — always look at the top-risks table, not the Index alone.
 ## What the reminder and escalation e-mails mean
 
 ComplyTrack sends reminders on a schedule and escalates when nothing happens.
-Both use editable templates (Administrator → Email Templates).
+Both use editable templates (Administrator → Reminders & Escalation →
+Templates).
 
 ### Reminder e-mails
 
@@ -169,7 +170,8 @@ scope.
 
 *What it is for:* deciding when reminders fire and when issues escalate.
 
-*How to get there:* **Admin → Reminder Profiles** and **Admin → Escalation Matrix**.
+*How to get there:* **Admin → Reminders & Escalation → Profiles** and
+**Admin → Reminders & Escalation → Escalation ladder**.
 
 *Key actions:* create or edit a profile — the offsets (e.g. 90/60/30/15/7/3/1/0),
 the channels (email / in-app / push), who is notified at each offset, the
@@ -183,7 +185,7 @@ Assign a profile to a template or an individual item.
 
 *What it is for:* wording of every outgoing reminder, escalation and digest.
 
-*How to get there:* **Admin → Email Templates**.
+*How to get there:* **Admin → Reminders & Escalation → Templates**.
 
 *Key actions:* edit subject and body using the placeholders `{Item}`,
 `{Item Code}`, `{Unit}`, `{Reference No.}`, `{Authority}`, `{Expiry Date}`,
@@ -203,14 +205,22 @@ display.
 loaded). Holidays are used to show, for example, that a due date falling on a
 Sunday means action is really due the previous working day.
 
-### Admin: System Settings & Integration Settings
+### Admin: Settings
 
 *What it is for:* financial-year start, timezone, quiet hours, default lead
-times, branding, and the SMTP/SSO integration.
+times and branding — the key/value configuration the rest of the app reads.
 
-*How to get there:* **Admin → System Settings** and **Admin → Integration
-Settings** (the latter maps to the environment variables documented in the
-README — SMTP host/port/credentials, Entra tenant/client, and so on).
+*How to get there:* **Admin → Master data → Settings**. It is the last tab on the
+master-data page. (The Entra ID single-sign-on values are **not** here; they are
+environment variables, documented in the README and set by whoever deploys the
+app.)
+
+*Key actions:* change the working year, timezone and quiet hours without a
+redeploy. The **mail relay is not here** — it has its own screen
+(**Admin → Reminders & Escalation → E-mail (SMTP)**) with a **Send test e-mail**
+button, and the spooled messages it produces are readable on **Admin →
+Reminders & Escalation → Outbox**. See the Administrator Guide §3.4 for how the
+two interact with the environment.
 
 ### Admin: Import / Export
 
@@ -247,7 +257,8 @@ Administrator — can edit or delete audit rows.**
 
 *What it is for:* confirming the 07:00 IST reminder/escalation run happened.
 
-*How to get there:* **Admin → Jobs** (or the reminder engine's job history).
+*How to get there:* **Admin → Reminders & Escalation → Jobs** (or the reminder
+engine's job history).
 
 *Key actions:* see last run, counts of reminders sent, duplicates suppressed,
 failures, deferrals and escalations. If a run failed, an alert notification is

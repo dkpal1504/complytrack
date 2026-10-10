@@ -325,7 +325,7 @@ Compose-only variables (not read by the app): `POSTGRES_USER`,
 
 ### Mail server settings are also editable in the app
 
-An administrator can set the relay from **Reminder engine → E-mail (SMTP)**
+An administrator can set the relay from **Reminders & Escalation → E-mail (SMTP)**
 without editing a file on the server. Those values are stored in the `settings`
 table, and the same screen carries a **Send test e-mail** button that reports
 what the mail server actually answered — the quickest way to tell a wrong
@@ -497,7 +497,7 @@ one so only a single scheduler exists, and let it own the 07:00 IST run.
 | `ModuleNotFoundError: app` when starting uvicorn | Run uvicorn **from the `backend/` directory**, or use the venv interpreter explicitly (`.venv/Scripts/python.exe -m uvicorn app.main:app`) |
 | Port 8000 already in use | Another process holds it. Start with `--port 8001`, or stop the other process |
 | Dashboard shows no data on first run | Seeding runs at startup. Check the log line `Seed complete: {...}`; confirm `SEED_ON_STARTUP=true`. Re-run `make seed` |
-| No e-mails arrive | Expected when no mail server is set — messages are written as `.eml` files under `backend/outbox/` and can be opened and read on **Reminder engine → Outbox**. Point the engine at a relay on **Reminder engine → E-mail (SMTP)**, then press *Send test e-mail*, which reports the mail server's own error |
+| No e-mails arrive | Expected when no mail server is set — messages are written as `.eml` files under `backend/outbox/` and can be opened and read on **Reminders & Escalation → Outbox**. Point the engine at a relay on **Reminders & Escalation → E-mail (SMTP)**, then press *Send test e-mail*, which reports the mail server's own error |
 | Reminders did not run at 07:00 | Check `/health` → `"scheduler": "running"`. Confirm `SCHEDULER_ENABLED=true`, and use the Admin job dashboard / `POST /api/v1/reminders/run` to trigger manually |
 | `422 Some fields need attention` from the API | Field-level validation failed; the response lists `errors[].field` and `.message` for the UI |
 | Upload rejected | Over the 25 MB limit or an extension outside `ALLOWED_UPLOAD_EXTENSIONS`. Adjust the env vars if the policy differs |

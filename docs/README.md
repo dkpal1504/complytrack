@@ -300,11 +300,12 @@ ready-to-copy template.
 | `PASSWORD_MIN_LENGTH` | `12` | Local password policy (upper+lower+digit+symbol also required) |
 | `ENTRA_TENANT_ID` / `ENTRA_CLIENT_ID` / `ENTRA_CLIENT_SECRET` | empty | Entra ID SSO; blank = local auth only |
 | `ENTRA_REDIRECT_URI` | `http://localhost:8000/api/auth/sso/callback` | SSO redirect URI |
-| `SMTP_HOST` | empty | SMTP relay; **blank spools mail to `outbox/`** |
-| `SMTP_PORT` | `587` | SMTP port |
+| `SMTP_HOST` | empty | SMTP relay; **blank spools mail to `outbox/`** (see the note below) |
+| `SMTP_PORT` | `587` | SMTP port — 587 for STARTTLS, 465 for implicit SSL |
 | `SMTP_USER` / `SMTP_PASSWORD` | empty | SMTP credentials |
 | `SMTP_FROM` | `complytrack@example.com` | From address |
-| `SMTP_USE_TLS` | `true` | STARTTLS |
+| `SMTP_USE_TLS` | `true` | STARTTLS — starts plain and upgrades |
+| `SMTP_USE_SSL` | `false` | Implicit TLS (SMTPS). Mutually exclusive with `SMTP_USE_TLS`, and wins if both are set |
 | `MAIL_OUTBOX_DIR` | `backend/outbox` | Spool directory when SMTP is unset |
 | `SCHEDULER_ENABLED` | `true` | Enable the in-process reminder scheduler |
 | `SCHEDULER_HOUR_IST` | `7` | Daily run hour (IST) |
@@ -321,6 +322,21 @@ ready-to-copy template.
 
 Compose-only variables (not read by the app): `POSTGRES_USER`,
 `POSTGRES_PASSWORD`, `POSTGRES_DB`, `BACKEND_PORT`, `FRONTEND_PORT`.
+
+### Mail server settings are also editable in the app
+
+An administrator can set the relay from **Reminders & Escalation → E-mail (SMTP)**
+without editing a file on the server. Those values are stored in the `settings`
+table, and the same screen carries a **Send test e-mail** button that reports
+what the mail server actually answered — the quickest way to tell a wrong
+password from a wrong port.
+
+Precedence is **all-or-nothing**: as soon as `SMTP_HOST` is set in the
+environment, the environment governs *every* mail variable and the screen turns
+read-only. That is deliberate. A half-merged state — an environment host with a
+port or sender left over from the settings table — is exactly how mail quietly
+goes to the wrong relay. For production, set the `SMTP_*` variables in the
+environment and leave the screen alone.
 
 ---
 
@@ -481,7 +497,7 @@ one so only a single scheduler exists, and let it own the 07:00 IST run.
 | `ModuleNotFoundError: app` when starting uvicorn | Run uvicorn **from the `backend/` directory**, or use the venv interpreter explicitly (`.venv/Scripts/python.exe -m uvicorn app.main:app`) |
 | Port 8000 already in use | Another process holds it. Start with `--port 8001`, or stop the other process |
 | Dashboard shows no data on first run | Seeding runs at startup. Check the log line `Seed complete: {...}`; confirm `SEED_ON_STARTUP=true`. Re-run `make seed` |
-| No e-mails arrive | Expected when `SMTP_HOST` is blank — mail is written as `.eml` files under `backend/outbox/`. Set the SMTP variables to send for real |
+| No e-mails arrive | Expected when no mail server is set — messages are written as `.eml` files under `backend/outbox/` and can be opened and read on **Reminders & Escalation → Outbox**. Point the engine at a relay on **Reminders & Escalation → E-mail (SMTP)**, then press *Send test e-mail*, which reports the mail server's own error |
 | Reminders did not run at 07:00 | Check `/health` → `"scheduler": "running"`. Confirm `SCHEDULER_ENABLED=true`, and use the Admin job dashboard / `POST /api/v1/reminders/run` to trigger manually |
 | `422 Some fields need attention` from the API | Field-level validation failed; the response lists `errors[].field` and `.message` for the UI |
 | Upload rejected | Over the 25 MB limit or an extension outside `ALLOWED_UPLOAD_EXTENSIONS`. Adjust the env vars if the policy differs |

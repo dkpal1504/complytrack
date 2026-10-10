@@ -25,6 +25,10 @@ This script covers:
 6. **Go-live gate (PRD §17.4):** every case must pass, or a failure must have an
    agreed workaround signed off by the Compliance Team.
 
+> **Start with Part C.** Although it is printed last, **Part C** (UAT-60, UAT-61)
+> configures the mail relay and shows how to read what the engine sent. The
+> reminder cases in Part A — UAT-14 especially — assume you have done it.
+
 ### Result legend
 
 `☐ Pass` `☐ Fail` — tick one. Use the notes column at the end of each case.
@@ -51,13 +55,19 @@ This script covers:
 | Arun Nair | `admin@complytrack.local` | Administrator | IT |
 | Leela Thomas | `auditor@complytrack.local` | Auditor | Administration |
 
-**Before you start:** confirm the **Administrator → Jobs** page shows the
-scheduler as running, and that `/health` returns `"status": "ok"`.
+**Before you start:** confirm the **Admin → Reminders & Escalation → Jobs** page
+shows the scheduler as running, and that `/health` returns `"status": "ok"`.
 
-**Note on e-mail:** if SMTP is not configured, all outgoing mail is written as
-`.eml` files under `backend/outbox/`. Open them in any mail client. If SMTP
-*is* configured, check the recipient mailbox instead. Cases that say "open the
-e-mail" accept either.
+**Note on e-mail:** you no longer have to reach the server's filesystem to check
+this. If a mail relay is configured, mail goes to the recipient's mailbox. If it
+is not, every outgoing message is spooled as a `.eml` file under
+`backend/outbox/` — open **Admin → Reminders & Escalation → Outbox** to list
+them and read any one of them in the browser, exactly as the recipient would see
+it. To point the engine at a relay, or to prove the current settings work, use
+**Admin → Reminders & Escalation → E-mail (SMTP)** and press **Send test
+e-mail**; it reports the mail server's own answer, so a wrong password reads
+differently from a wrong port. Cases that say "open the e-mail" accept any of
+these three.
 
 ---
 
@@ -220,8 +230,8 @@ e-mail" accept either.
 ### UAT-13 — Default reminder offsets
 - **Requirement:** RM-01 (M)
 - **Role:** Administrator
-- **Steps:** open **Admin → Reminder Profiles → Default** and inspect the
-  offsets; then open an item on the default profile.
+- **Steps:** open **Admin → Reminders & Escalation → Profiles → Default** and
+  inspect the offsets; then open an item on the default profile.
 - **Expected result:** offsets are **90, 60, 30, 15, 7, 3, 1 and 0 days**, with
   a post-expiry repeat of every **2 days**; the item uses them (or a profile
   overridden per category/criticality/item).
@@ -231,11 +241,15 @@ e-mail" accept either.
 - **Requirement:** RM-02 (M — e-mail, in-app, push)
 - **Role:** Department User / Administrator
 - **Steps:**
-  1. Trigger a reminder for an item you own (Admin → **Run now**, or wait for
+  1. Confirm the relay first: **Admin → Reminders & Escalation → E-mail (SMTP) →
+     Send test e-mail**. It must report success before the rest of this case is
+     meaningful.
+  2. Trigger a reminder for an item you own (Admin → **Run now**, or wait for
      the 07:00 IST run).
-  2. Open the **e-mail** (or the `.eml` in `outbox/`).
-  3. Open the **bell / Notification Centre**.
-  4. On a phone, install the PWA and allow notifications, then trigger another.
+  3. Open the **e-mail** — in the recipient's mailbox, or on **Admin →
+     Reminders & Escalation → Outbox** if no relay is set.
+  4. Open the **bell / Notification Centre**.
+  5. On a phone, install the PWA and allow notifications, then trigger another.
 - **Expected result:** the reminder arrives by **e-mail**, appears **in-app**,
   and arrives as a **push** notification on the installed PWA.
 - **Result:** ☐ Pass ☐ Fail — Tester: ______ Date: ______ Notes:
@@ -283,20 +297,22 @@ e-mail" accept either.
 ### UAT-19 — Delivery tracking, retry and failure alert
 - **Requirement:** RM-08 (M)
 - **Role:** Administrator
-- **Steps:** open **Admin → Reminders → Log**; find a reminder's status. Cause a
-  failure (e.g. point SMTP at an invalid host in a test environment), run the
-  job, then click **Retry failed**.
+- **Steps:** open **Admin → Reminders & Escalation → Delivery log** and find a
+  reminder's status. Cause a failure the clean way: on **Admin → Reminders &
+  Escalation → E-mail (SMTP)**, set the port to an unused one (e.g. `9`), press
+  **Send test e-mail** to see the failure reported, then run the job. Click
+  **Retry failed**. Restore the correct port afterwards.
 - **Expected result:** each reminder shows sent/delivered/failed/read where
-  available; failed ones can be retried; and a failed delivery raises an alert
-  to the Administrator.
+  available; a failed delivery raises an alert to the Administrator; after the
+  port is corrected, **Retry failed** re-sends and the status clears.
 - **Result:** ☐ Pass ☐ Fail — Tester: ______ Date: ______ Notes:
 
 ### UAT-20 — Editable e-mail templates
 - **Requirement:** RM-10 (M)
 - **Role:** Administrator
-- **Steps:** open **Admin → Email Templates**, edit the *Upcoming renewal*
-  template to add a sentence and use one new placeholder (e.g. `{Owner}`);
-  save and trigger a reminder.
+- **Steps:** open **Admin → Reminders & Escalation → Templates**, edit the
+  *Upcoming renewal* template to add a sentence and use one new placeholder
+  (e.g. `{Owner}`); save and trigger a reminder.
 - **Expected result:** the change is accepted and the outgoing mail reflects the
   new wording and the substituted placeholder.
 - **Result:** ☐ Pass ☐ Fail — Tester: ______ Date: ______ Notes:
@@ -305,7 +321,8 @@ e-mail" accept either.
 - **Requirement:** RM-11 (M)
 - **Role:** Administrator
 - **Steps:**
-  1. Open **Admin → Jobs** and note the next run time and today's record.
+  1. Open **Admin → Reminders & Escalation → Jobs** and note the next run time
+     and today's record.
   2. Click **Run now** twice in a row.
   3. Note the count of reminders sent and the count of duplicates suppressed.
 - **Expected result:** the daily job is scheduled for **07:00 IST**; the second
@@ -712,6 +729,54 @@ e-mail" accept either.
 
 ---
 
+# Part C — Operating the mail engine (administrator)
+
+These two cases are not PRD requirements; they are the tools that make the RM
+cases above checkable by an administrator without shell access to the server.
+Run them **first** — UAT-14, UAT-19 and UAT-20 all lean on them.
+
+### UAT-60 — Configure the relay in the app, and prove it works
+- **Requirement:** RM-02 (the e-mail channel); administrator tooling
+- **Role:** Administrator
+- **Steps:**
+  1. Open **Admin → Reminders & Escalation → E-mail (SMTP)**.
+  2. Enter the relay host, port, credentials and sender address. Set
+     **STARTTLS** for a 587 relay, or **implicit TLS (SMTPS)** for 465.
+  3. Press **Send test e-mail** with the recipient blank (it sends to your own
+     address), then again with a colleague's address.
+  4. Introduce a fault — a wrong password, or an unused port — and press the
+     button again. Then correct it.
+  5. Confirm `/health` reports `"smtp_configured": true`.
+  6. Sign in as the Compliance Team and confirm the screen is **not** reachable.
+- **Expected result:** the settings save; the test e-mail is delivered; asking
+  for **both** STARTTLS and implicit TLS is refused with a clear message rather
+  than guessed at; a wrong password or a blocked port comes back as a readable
+  sentence from the server, not a crash or a silent failure; `/health` reflects
+  the stored relay; and the Compliance Team is refused, because the screen
+  requires the settings permission.
+- **Result:** ☐ Pass ☐ Fail — Tester: ______ Date: ______ Notes:
+
+### UAT-61 — Read what the engine would have sent, with no relay at all
+- **Requirement:** RM-02 and RM-08 (verification tooling)
+- **Role:** Administrator
+- **Steps:**
+  1. On **Admin → Reminders & Escalation → E-mail (SMTP)**, clear the host so
+     no relay is configured.
+  2. Run the job: **Admin → Reminders & Escalation → Jobs → Run now**.
+  3. Open **Admin → Reminders & Escalation → Outbox**, open the first few
+     messages, and switch between the readable **message** view and the **HTML
+     source**.
+  4. Count the messages in the outbox, then compare with the deliveries reported
+     by the run and the rows on **Admin → Reminders & Escalation → Delivery log**.
+- **Expected result:** the outbox lists one file per message the run produced,
+  with **nothing silently overwritten**; each opens showing its To, From, Sent
+  time, subject and body; a message that went to several channels appears once
+  per e-mail delivery, not once per reminder. Escalation e-mails are **not** in
+  the reminder log — they are on the escalation log — so reconcile against both.
+- **Result:** ☐ Pass ☐ Fail — Tester: ______ Date: ______ Notes:
+
+---
+
 ## Coverage matrix
 
 Every mandatory (§5 M) requirement and every acceptance criterion maps to at
@@ -760,6 +825,10 @@ RP-02, RP-03, RP-04, RP-05, RP-06, RP-07, RP-11, AC-01, AC-02, AC-03, AC-04,
 EX-04, EX-06 — **all 51**.
 
 **Acceptance criteria covered:** AC-1 … AC-8 — **all 8**.
+
+**Part C** (UAT-60, UAT-61) covers no requirement of its own — it verifies the
+administrator tooling that makes **RM-02** and **RM-08** checkable without shell
+access, and it should be run before the RM cases.
 
 ---
 
