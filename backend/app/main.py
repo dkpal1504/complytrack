@@ -16,6 +16,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.responses import Response
+from starlette.types import Scope
 
 from app.api.router import api_router
 from app.core.config import settings
@@ -225,6 +228,33 @@ def meta() -> dict:
 
 # The built single-page app is served from here in a packaged deployment, so the
 # API and the UI share one origin (and one TLS certificate).
+class _SpaStaticFiles(StaticFiles):
+    """Static files that fall back to index.html so client-side routes deep-link.
+
+    The UI routes with the History API, so a deep link such as /items — or a
+    refresh on it — is a genuine request for a path with no file behind it. Only
+    unmatched paths reach this mount, because every API route is registered ahead
+    of it. Paths under /api/ are deliberately left as 404s: answering a missing
+    endpoint with the HTML shell would turn a real error into a 200.
+    """
+
+    async def get_response(self, path: str, scope: Scope) -> Response:
+        # Starlette raises for a miss instead of returning a 404 response, so
+        # both shapes are handled to keep this correct across versions.
+        try:
+            response = await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            if exc.status_code != 404 or scope["path"].startswith("/api/"):
+                raise
+            return await self._index(scope)
+        if response.status_code == 404 and not scope["path"].startswith("/api/"):
+            return await self._index(scope)
+        return response
+
+    async def _index(self, scope: Scope) -> Response:
+        return await super().get_response("index.html", scope)
+
+
 _frontend_dist = settings.frontend_dist_dir
 if _frontend_dist and _frontend_dist.exists():
-    app.mount("/", StaticFiles(directory=_frontend_dist, html=True), name="ui")
+    app.mount("/", _SpaStaticFiles(directory=_frontend_dist, html=True), name="ui")
